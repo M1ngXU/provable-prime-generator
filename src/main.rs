@@ -87,7 +87,7 @@ fn trial_division(a: &Int, b: u64) -> bool {
     debug_assert!(&Int::from(b) < a, "`b` greater a, {b} >= {a}");
     PRIMES
         .iter() // avoid `.into_iter()` to prevent stack overflow
-        .take_while(|p| p <= &&b)
+        .take(PRIMES_UNTIL_2K[usize::BITS as usize - b.leading_zeros() as usize])
         .all(|p| (a % p).0[0] != 0)
 }
 /// Generates a number between `0.5` and `max`, see Appendix 1
