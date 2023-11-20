@@ -99,22 +99,8 @@ fn generate_relative_size(max: f64) -> f64 {
     let r = thread_rng().gen_range(0.0..1.0 + max.log2());
     2.0f64.powf(r - 1.0)
 }
-/// Calculates a<sup>n</sup> mod m
-fn pow_mod_n(a: &Int, n: &Int, m: &Int) -> Int {
-    let mut x = a.clone();
-    let mut y = Int::one();
-    for i in 0..Int::count_bits() as usize - n.leading_zeros() as usize - 1 {
-        // only least significant bit relevant for odd check
-        if n.bit(i) == Some(true) {
-            y = mul(&x, &y) % m;
-        }
-        x = mul(&x, &x) % m;
-    }
-
-    mul(&x, &y) % m
-}
 /// Checks whether lemma 1 is true with `F = q`
-fn check_lemma1(n: &Int, a: &Int, r: Int, q: &Int) -> bool {
+fn check_lemma1(k: usize, n: &Int, a: &Int, r: Int, q: &Int) -> bool {
     // (1) a^(n - 1) = 1 mod n
     // (2) gcd(a^((n - 1) / q) - 1, n) = 1
     //
@@ -125,8 +111,51 @@ fn check_lemma1(n: &Int, a: &Int, r: Int, q: &Int) -> bool {
     // (n - 1) / q = 2R
     // (2) gcd(a^(2R) - 1, n) = 1
 
-    let anq = pow_mod_n(a, &(r << 1), n);
-    (&anq - Int::one()).gcd(n) == Int::one() && pow_mod_n(&anq, q, n) == Int::one()
+    // this is e >> 1
+    let e = &r;
+    let k_ = (k + 1).div_ceil(u64::BITS as usize);
+    let mut r_ = Int::zero();
+    r_.0[k_] = 1;
+    let r_ = r_;
+    let y_ = &r_ % n;
+
+    let mut n_ = mod_inverse(n, &r_);
+    n_.0[k_..].fill(0);
+    let n_ = sub(&r_, &n_);
+
+    let mut x = Int::zero();
+    let l = x.0.len();
+    x.0[k_..].copy_from_slice(&a.0[..l - k_]);
+    x %= n;
+    let mut y = y_.clone();
+    for i in 0..Int::count_bits() as usize - e.leading_zeros() as usize - 1 + 1 {
+        // only least significant bit relevant for odd check, sub 1 since first is 0
+        if e.bit(i.wrapping_sub(1)) == Some(true) {
+            y = redc(k_, n, &n_, mul(&x, &y));
+        }
+        x = redc(k_, n, &n_, mul(&x, &x));
+    }
+
+    let anq = redc(k_, n, &n_, mul(&x, &y));
+
+    if &(&anq - Int::one()).gcd(&y_) == &y_ {
+        return false;
+    }
+
+    let e = q;
+    let mut x = anq;
+    let mut y = y_.clone();
+    for i in 0..Int::count_bits() as usize - e.leading_zeros() as usize - 1 {
+        // only least significant bit relevant for odd check
+        if e.bit(i) == Some(true) {
+            y = redc(k_, n, &n_, mul(&x, &y));
+        }
+        x = redc(k_, n, &n_, mul(&x, &x));
+    }
+
+    let anq2 = redc(k_, n, &n_, mul(&x, &y));
+
+    anq2 == y_
 }
 
 // constants
@@ -185,7 +214,7 @@ fn fast_prime(k: u64) -> Option<Int> {
                 let a = random(&int!("2"), &n);
                 n.0[0] += 1; // this can't overflow since rq2 is even (u64::MAX is odd)
 
-                (trial_division(&n, g) && check_lemma1(&n, &a, r, &q)).then_some(n)
+                (trial_division(&n, g) && check_lemma1(k as usize, &n, &a, r, &q)).then_some(n)
             })
             .find_map_any(identity)?;
         // .find_map(identity)?; // use this for single threaded
@@ -201,9 +230,94 @@ fn add(a: &Int, b: &Int) -> Int {
     return a.overflowing_add(b).0;
 }
 #[inline(always)]
+fn sub(a: &Int, b: &Int) -> Int {
+    #[cfg(not(feature = "ignore-overflow"))]
+    return a - b;
+    #[cfg(feature = "ignore-overflow")]
+    return a.overflowing_sub(b).0;
+}
+#[inline(always)]
 fn mul(a: &Int, b: &Int) -> Int {
     #[cfg(not(feature = "ignore-overflow"))]
     return a * b;
     #[cfg(feature = "ignore-overflow")]
     return a.overflowing_mul(b).0;
+}
+
+// R = 2^(k * 64)
+fn redc(k: usize, n: &Int, n_: &Int, t: Int) -> Int {
+    let mut t2 = t.clone();
+    // t %= R
+    t2.0[k..].fill(0);
+    // m = (t * n') % R
+    let mut m = mul(&t2, n_);
+    m.0[k..].fill(0);
+
+    // t' = (t + m * n) / R
+    let mn = mul(&m, n);
+    let mut t_ = Int::zero();
+    let mut borrow = false;
+    for i in 0..k {
+        let (a, b) = t.0[i].overflowing_add(mn.0[i]);
+        borrow = b || a.overflowing_add(1).1;
+    }
+    for i in k..t_.0.len() {
+        let b;
+        (t_.0[i - k], b) = t.0[i].overflowing_add(mn.0[i]);
+        let mut b2 = false;
+        if borrow {
+            (t_.0[i - k], b2) = t_.0[i - k].overflowing_add(1);
+        }
+        borrow = b || b2;
+    }
+    while &t_ > n {
+        t_ = sub(&t_, n);
+    }
+    t_
+}
+fn extended_gcd(a: &Int, b: &Int) -> (Int, Int, bool) {
+    let (mut old_r, mut r) = (a.clone(), b.clone());
+    let (mut old_s, mut s, mut sign_s, mut sign_old_s) = (Int::one(), Int::zero(), false, false);
+
+    while !r.is_zero() {
+        let quotient = &old_r / &r;
+        let qr = mul(&quotient, &r);
+        let qs = mul(&quotient, &s);
+
+        (old_r, r) = (r, &old_r - qr);
+        let s_ = (s.clone(), sign_s);
+        (s, sign_s) = match (sign_s, sign_old_s) {
+            (false, false) if old_s >= qs => (sub(&old_s, &qs), false),
+            (false, false) => (sub(&qs, &old_s), true),
+            (false, true) => (add(&old_s, &qs), true),
+            (true, false) => (add(&old_s, &qs), false),
+            (true, true) if qs >= old_s => (sub(&qs, &old_s), false),
+            (true, true) => (sub(&qs, &old_s), true),
+        };
+        (old_s, sign_old_s) = s_;
+    }
+
+    (old_r, old_s, sign_old_s)
+}
+
+fn mod_inverse(a: &Int, n: &Int) -> Int {
+    let (gcd, x, s) = extended_gcd(a, n);
+    debug_assert_eq!(gcd, Int::one());
+    if s {
+        sub(&n, &x)
+    } else {
+        x
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mod_inverse() {
+        let a: u32 = 67;
+        let n: u32 = 101;
+        let e: u32 = 98;
+        assert_eq!(Int::from(e), mod_inverse(&Int::from(a), &Int::from(n)));
+    }
 }
