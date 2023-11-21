@@ -10,9 +10,28 @@ fn main() {
     let mut primes = vec![];
     let mut primes_until_2k = vec![0];
 
-    'outer: for i in 2u32..=1 << 16 {
+    'outer: for i in 2u32..=1 << 20 {
         if i.is_power_of_two() {
             primes_until_2k.push(primes.len());
+            writeln!(
+                file,
+                "/// First 2<sup>{}</sup> prime numbers in a const-sized `[u64; {}]`, generated in \
+                `build.rs`. See more information in crate-level documentation.",
+                i.trailing_zeros(),
+                primes.len()
+            )
+            .unwrap();
+            writeln!(
+                file,
+                "pub static PRIMES_{:02}: [u64; {}] = [",
+                i.trailing_zeros(),
+                primes.len(),
+            )
+            .unwrap();
+            for prime in &primes {
+                writeln!(file, "    {},", prime).unwrap();
+            }
+            writeln!(file, "];").unwrap();
         }
         for p in &primes {
             if i % p == 0 {
@@ -24,21 +43,8 @@ fn main() {
 
     writeln!(
         file,
-        "/// First 2<sup>16</sup> prime numbers in a const-sized `[u64; {}]`, generated in \
-		 `build.rs`. See more information in crate-level documentation.",
-        primes.len()
-    )
-    .unwrap();
-    writeln!(file, "pub static PRIMES: [u64; {}] = [", primes.len()).unwrap();
-    for prime in primes {
-        writeln!(file, "    {},", prime).unwrap();
-    }
-    writeln!(file, "];").unwrap();
-
-    writeln!(
-        file,
         "/// Mapping from `k` to `π(2<sup>k</sup>)` const-sized `[usize; {}]`, generated in \
-		 `build.rs`. See more information in crate-level documentation.",
+    	 `build.rs`. See more information in crate-level documentation.",
         primes_until_2k.len()
     )
     .unwrap();

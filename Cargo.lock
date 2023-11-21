@@ -64,10 +64,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "e16-primes"
-version = "0.1.0"
-
-[[package]]
 name = "either"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -160,6 +156,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 
 [[package]]
+name = "primes"
+version = "0.1.0"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -173,8 +173,8 @@ name = "provable-prime-generator"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "e16-primes",
  "numext-fixed-uint",
+ "primes",
  "rand",
  "rayon",
 ]

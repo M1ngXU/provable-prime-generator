@@ -10,7 +10,7 @@ ctrlc = { version = "3.4.1", features = ["termination"] }
 numext-fixed-uint = { version = "0.1.6" }
 rand = "0.8.5"
 rayon = "1.8.0"
-e16-primes = { path = "e16-primes" }
+primes = { path = "primes" }
 
 [features]
 default = []

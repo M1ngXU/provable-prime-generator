@@ -1,3 +1,5 @@
+#![feature(concat_idents)]
+
 use std::convert::identity;
 use std::fs::File;
 use std::hint::black_box;
@@ -5,8 +7,8 @@ use std::io::{stdout, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use e16_primes::*;
 use numext_fixed_uint::{u2048 as int, U2048};
+use primes::*;
 use rand::{thread_rng, Rng};
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
@@ -87,17 +89,20 @@ fn trial_division(a: &Int, b: u64) -> bool {
     debug_assert!(&Int::from(b) < a, "`b` greater a, {b} >= {a}");
     PRIMES
         .iter() // avoid `.into_iter()` to prevent stack overflow
-        .take(PRIMES_UNTIL_2K[usize::BITS as usize - b.leading_zeros() as usize])
+        .take_while(|p| p < &&b)
         .all(|p| (a % p).0[0] != 0)
 }
 /// Generates a number between `0.5` and `max`, see Appendix 1
 fn generate_relative_size(max: f64) -> f64 {
-    debug_assert!((0.5..=1.0).contains(&max));
-    // r = 1 + log2(x)
-    // r - 1 = log2(x)
-    // 2^(r - 1) = x
-    let r = thread_rng().gen_range(0.0..1.0 + max.log2());
-    2.0f64.powf(r - 1.0)
+    if max <= 0.5 {
+        0.5
+    } else {
+        // r = 1 + log2(x)
+        // r - 1 = log2(x)
+        // 2^(r - 1) = x
+        let r = thread_rng().gen_range(0.0..1.0 + max.log2());
+        2.0f64.powf(r - 1.0)
+    }
 }
 /// Calculates a<sup>n</sup> mod m
 fn pow_mod_n(a: &Int, n: &Int, m: &Int) -> Int {
@@ -131,9 +136,11 @@ fn check_lemma1(n: &Int, a: &Int, r: Int, q: &Int) -> bool {
 
 // constants
 const C_OPT_N: u64 = 1;
-const C_OPT_D: u64 = 1024 * 1024 / (1 << 16);
-const MARGIN: u64 = 16;
-const P0: u64 = 2 * MARGIN; // 2 * margin; if less than (2^16)^2 then easy to find prime with table
+const C_OPT_D: u64 = 200;
+const MARGIN: u64 = 20;
+
+static PRIMES: &[u64] = &PRIMES_10;
+const P0: u64 = 2 * 10;
 
 fn fast_prime(k: u64) -> Option<Int> {
     let n;
@@ -141,14 +148,17 @@ fn fast_prime(k: u64) -> Option<Int> {
     if k <= P0 {
         let _2k = 1 << k;
         let _2k1 = _2k >> 1;
-        let mut n64 = 4; // not prime
+        let mut n64; // not prime
         let mut rng = thread_rng();
-        while PRIMES
-            .iter()
-            .take(PRIMES_UNTIL_2K[(k as usize - 1) / 2 + 1])
-            .any(|p| n64 % p == 0)
-        {
+        loop {
             n64 = rng.gen_range(_2k1.._2k);
+            if PRIMES
+                .iter()
+                .take(PRIMES_UNTIL_2K[(k as usize - 1) / 2 + 1])
+                .any(|p| n64 % p == 0)
+            {
+                break;
+            }
         }
         n = Int::from(n64);
     } else {
